@@ -1,6 +1,6 @@
 //archivo principal de gestión del funcionamiento
 
-import { mat4 } from "https://cdn.jsdelivr.net/npm/gl-matrix@2.8.1/esm/index.js"; //librería gl-matrix instalada
+import { mat4 } from 'https://cdn.jsdelivr.net/npm/gl-matrix@2.8.1/esm/index.js'; //librería gl-matrix
 import { initWebGL } from './utils.js'; //archivo auxiliar
 import SolidShader from './shaders/SolidShader.js' //clase de solid shader
 
@@ -60,7 +60,7 @@ function render() {
 
     gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
 
-    solidShader.setAttribute('aPosition', 3, gl.FLOAT, flase, 0, 0);
+    solidShader.setAttribute('aPosition', 3, gl.FLOAT, false, 0, 0);
 
     //combinar matrices para renderizar
     const mvpMatrix = mat4.create();
