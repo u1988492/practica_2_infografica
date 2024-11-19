@@ -1,0 +1,1 @@
+//logica para la geometria de la sala
