@@ -12,11 +12,9 @@
 </head>
 <body>
     <canvas id="webgl-canvas"></canvas>
+    <!-- Include the local gl-matrix library -->
+    <script src="./libs/gl-matrix.js"></script>
+    <!-- Main script -->
     <script type="module" src="./src/script.js"></script>
-    <script type="module">
-        import { mat4 } from 'https://cdn.jsdelivr.net/npm/gl-matrix@2.8.1/esm/gl-matrix.js';
-    </script>
-
 </body>
 </html>
-
