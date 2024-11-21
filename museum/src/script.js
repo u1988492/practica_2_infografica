@@ -2,8 +2,8 @@ import { initWebGL } from './utils.js';
 import SolidShader from './shaders/SolidShader.js';
 
 let gl, canvas;
-let projectionMatrix, viewMatrix, modelMatrix;
-let vertexBuffer, colorBuffer;
+let projectionMatrix, viewMatrix;
+
 let solidShader;
 
 const camera = {
@@ -14,43 +14,7 @@ const camera = {
 
 let keysPressed = {};
 let yaw = 0;
-let pitch = 0
-
-function main() {
-    canvas = document.getElementById('webgl-canvas');
-    gl = initWebGL(canvas);
-
-    if (!gl) {
-        console.error('WebGL2 not available');
-        return;
-    }
-
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.clearColor(0.2, 0.3, 0.4, 1.0);
-    gl.enable(gl.DEPTH_TEST);
-
-    projectionMatrix = mat4.create();
-    viewMatrix = mat4.create();
-    modelMatrix = mat4.create();
-    mat4.translate(modelMatrix, modelMatrix, [0, 0.5, 0]);
-
-    mat4.perspective(projectionMatrix, Math.PI/3, canvas.width / canvas.height, 0.1, 100.0);
-    mat4.lookAt(viewMatrix, camera.position, camera.target, camera.up);
-    console.log("View Matrix:", viewMatrix);
-
-    solidShader = new SolidShader(gl);
-    setupRoom();
-    //setupSimpleTriangle();
-
-    console.log("Camera Position:", camera.position);
-console.log("Camera Target:", camera.target);
-console.log("Projection Matrix:", projectionMatrix);
-console.log("View Matrix:", viewMatrix);
-    
-    setupEventListeners();
-
-    render();
-}
+let pitch = 0;
 
 function setupEventListeners() {
     // Event listeners for keyboard and mouse events
@@ -64,8 +28,6 @@ function setupEventListeners() {
     let lastMouseX = 0;
     let lastMouseY = 0;
     let isMouseDown = false;
-    let pitch = 0; // Vertical angle (look up/down)
-    let yaw = 0;   // Horizontal angle (look left/right)
     let sensitivity = 0.002; // Sensitivity for mouse movement
 
     canvas.addEventListener('mousedown', (event) => {
@@ -97,50 +59,13 @@ function setupEventListeners() {
     });
 }
 
-function render() {
-    updateCamera();
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    solidShader.use();
+const roomBounds = {
+    minX: -10, maxX: 10,
+    minY: 0, maxY: 10,
+    minZ: -10, maxZ: 10
+};
 
-    // Set a solid color for the room
-    solidShader.setColor([0.5, 0.5, 0.5, 1.0]);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-
-    // Correct attribute setup
-    const positionAttributeLocation = gl.getAttribLocation(solidShader.program, 'aPosition');
-    if (positionAttributeLocation === -1) {
-        console.error("Attribute 'aPosition' not found in the shader program.");
-        return;
-    }
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
-    const colorAttributeLocation = gl.getAttribLocation(solidShader.program, 'aColor');
-    if (colorAttributeLocation === -1) {
-        console.error("Attribute 'aColor' not found in the shader program.");
-        return;
-    }
-
-    gl.vertexAttribPointer(positionAttributeLocation, 3, gl.FLOAT, false, 0, 0);
-    gl.enableVertexAttribArray(positionAttributeLocation);
-
-    // Debug: Check if vertex buffer data is set
-const bufferData = gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE);
-if (bufferData === 0) {
-    console.error("Vertex buffer is empty or not bound correctly.");
-}
-
-    const mvpMatrix = mat4.create();
-    mat4.multiply(mvpMatrix, projectionMatrix, viewMatrix);
-    mat4.multiply(mvpMatrix, mvpMatrix, modelMatrix);
-
-    solidShader.setUniformMatrix4fv('uModelViewProjection', mvpMatrix);
-
-    gl.drawArrays(gl.TRIANGLES, 0, 36);
-
-    requestAnimationFrame(render);
-}
 
 function updateCamera() {
     const moveSpeed = 0.1;
@@ -148,15 +73,18 @@ function updateCamera() {
     const right = vec3.create();
     const up = [0, 1, 0];
 
-    // Calculate new target position based on yaw and pitch
-    let targetX = camera.position[0] + Math.sin(yaw) * Math.cos(pitch);
-    let targetY = camera.position[1] + Math.sin(pitch); // Adjust vertical angle (pitch)
-    let targetZ = camera.position[2] + Math.cos(yaw) * Math.cos(pitch);
+    // Calculate direction based on yaw and pitch
+    const dirX = Math.cos(pitch) * Math.sin(yaw);
+    const dirY = Math.sin(pitch);
+    const dirZ = Math.cos(pitch) * Math.cos(yaw);
 
-    camera.target = [targetX, targetY, targetZ]; // Update camera's target
 
-    // Recalculate the view matrix to update the camera position and direction
-    mat4.lookAt(viewMatrix, camera.position, camera.target, camera.up);
+    // Update camera target
+    camera.target = [
+        camera.position[0] + dirX,
+        camera.position[1] + dirY,
+        camera.position[2] + dirZ,
+    ];
 
     // Calculate forward and right directions based on yaw and pitch
     vec3.subtract(forward, camera.target, camera.position);
@@ -166,89 +94,256 @@ function updateCamera() {
     vec3.normalize(right, right);
 
     // Handle movement (WASD keys)
-    if (keysPressed['w']) {  // Forward
+    if (keysPressed['w']) {
         vec3.scaleAndAdd(camera.position, camera.position, forward, moveSpeed);
-        vec3.scaleAndAdd(camera.target, camera.target, forward, moveSpeed);
     }
-    if (keysPressed['s']) {  // Backward
+    if (keysPressed['s']) {
         vec3.scaleAndAdd(camera.position, camera.position, forward, -moveSpeed);
-        vec3.scaleAndAdd(camera.target, camera.target, forward, -moveSpeed);
     }
-    if (keysPressed['a']) {  // Left
+    if (keysPressed['a']) {
         vec3.scaleAndAdd(camera.position, camera.position, right, -moveSpeed);
-        vec3.scaleAndAdd(camera.target, camera.target, right, -moveSpeed);
     }
-    if (keysPressed['d']) {  // Right
+    if (keysPressed['d']) {
         vec3.scaleAndAdd(camera.position, camera.position, right, moveSpeed);
-        vec3.scaleAndAdd(camera.target, camera.target, right, moveSpeed);
     }
+
+    const cameraRadius = 0.1; // Small buffer
+    // Collision detection: Clamp camera position within room bounds
+    camera.position[0] = Math.max(roomBounds.minX + cameraRadius, Math.min(roomBounds.maxX - cameraRadius, camera.position[0]));
+    camera.position[1] = Math.max(roomBounds.minY + cameraRadius, Math.min(roomBounds.maxY - cameraRadius, camera.position[1]));
+    camera.position[2] = Math.max(roomBounds.minZ + cameraRadius, Math.min(roomBounds.maxZ - cameraRadius, camera.position[2]));
+
 
     // Update the view matrix after any movement
     mat4.lookAt(viewMatrix, camera.position, camera.target, camera.up);
 }
 
+// Vertex and color data for the ground (a flat plane)
+const groundVertices = new Float32Array([
+    -10, 0, -10,  // Bottom-left
+    10, 0, -10,   // Bottom-right
+    10, 0, 10,    // Top-right
+    -10, 0, -10,  // Bottom-left
+    10, 0, 10,    // Top-right
+    -10, 0, 10,   // Top-left
+]);
+
+const groundColors = new Float32Array([
+    0.3, 0.7, 0.3, 1.0,  // Greenish
+    0.3, 0.7, 0.3, 1.0,  // Greenish
+    0.3, 0.7, 0.3, 1.0,  // Greenish
+    0.3, 0.7, 0.3, 1.0,  // Greenish
+    0.3, 0.7, 0.3, 1.0,  // Greenish
+    0.3, 0.7, 0.3, 1.0,  // Greenish
+]);
+
+// Vertex and color data for the sky (a large dome-like structure)
+const skyVertices = new Float32Array([
+    -100, -10, -100,  // Bottom-left
+    100, -10, -100,   // Bottom-right
+    100, 100, 100,    // Top-center
+    -100, -10, -100,  // Bottom-left
+    100, 100, 100,    // Top-center
+    -100, 100, 100,   // Top-left
+]);
 
 
+const skyColors = new Float32Array([
+    0.5, 0.7, 1.0, 1.0,  // Sky blue
+    0.5, 0.7, 1.0, 1.0,  // Sky blue
+    0.5, 0.7, 1.0, 1.0,  // Sky blue
+    0.5, 0.7, 1.0, 1.0,  // Sky blue
+    0.5, 0.7, 1.0, 1.0,  // Sky blue
+    0.5, 0.7, 1.0, 1.0,  // Sky blue
+]);
 
+function generateDome(radius, segments) {
+    const vertices = [];
+    const colors = [];
+    const indices = [];
 
-function setupRoom() {
-    const vertices = new Float32Array([
-        // Floor
-        -5, 0, -5,  5, 0, -5,  5, 0, 5,
-        -5, 0, -5,  5, 0, 5,  -5, 0, 5,
-        // Left wall
-        -5, 0, -5,  -5, 5, -5,  -5, 5, 5,
-        -5, 0, -5,  -5, 5, 5,  -5, 0, 5,
-        // Right wall
-        5, 0, -5,  5, 5, -5,  5, 5, 5,
-        5, 0, -5,  5, 5, 5,  5, 0, 5,
-        // Back wall
-        -5, 0, -5,  -5, 5, -5,  5, 5, -5,
-        -5, 0, -5,  5, 5, -5,  5, 0, -5,
-        // Ceiling
-        -5, 5, -5,  5, 5, -5,  5, 5, 5,
-        -5, 5, -5,  5, 5, 5,  -5, 5, 5,
-    ]);
+    for (let i = 0; i <= segments; i++) {
+        const theta = (Math.PI / 2) * (i / segments); // From 0 to π/2 for upper hemisphere
+        const sinTheta = Math.sin(theta);
+        const cosTheta = Math.cos(theta);
 
-     // Add the same indices to create faces with different colors
-     const colors = new Float32Array([
-        // Floor colors (gray)
-        0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
-        0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
-        // Left wall colors (light blue)
-        0.4, 0.6, 1.0, 1.0,  0.4, 0.6, 1.0, 1.0,  0.4, 0.6, 1.0, 1.0,
-        0.4, 0.6, 1.0, 1.0,  0.4, 0.6, 1.0, 1.0,  0.4, 0.6, 1.0, 1.0,
-        // Right wall colors (light green)
-        0.6, 1.0, 0.4, 1.0,  0.6, 1.0, 0.4, 1.0,  0.6, 1.0, 0.4, 1.0,
-        0.6, 1.0, 0.4, 1.0,  0.6, 1.0, 0.4, 1.0,  0.6, 1.0, 0.4, 1.0,
-        // Back wall colors (light red)
-        1.0, 0.4, 0.4, 1.0,  1.0, 0.4, 0.4, 1.0,  1.0, 0.4, 0.4, 1.0,
-        1.0, 0.4, 0.4, 1.0,  1.0, 0.4, 0.4, 1.0,  1.0, 0.4, 0.4, 1.0,
-        // Ceiling colors (light yellow)
-        1.0, 1.0, 0.4, 1.0,  1.0, 1.0, 0.4, 1.0,  1.0, 1.0, 0.4, 1.0,
-        1.0, 1.0, 0.4, 1.0,  1.0, 1.0, 0.4, 1.0,  1.0, 1.0, 0.4, 1.0,
-    ]);
+        for (let j = 0; j <= segments; j++) {
+            const phi = (2 * Math.PI) * (j / segments); // Full circle around the y-axis
+            const x = radius * sinTheta * Math.cos(phi);
+            const y = radius * cosTheta;
+            const z = radius * sinTheta * Math.sin(phi);
 
-    // Create buffer for colors
-    colorBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
+            vertices.push(x, y, z);
+            colors.push(0.5, 0.7, 1.0, 1.0); // Sky blue
+        }
+    }
 
-    vertexBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+    for (let i = 0; i < segments; i++) {
+        for (let j = 0; j < segments; j++) {
+            const first = i * (segments + 1) + j;
+            const second = first + segments + 1;
+
+            indices.push(first, second, first + 1);
+            indices.push(second, second + 1, first + 1);
+        }
+    }
+
+    return { vertices: new Float32Array(vertices), colors: new Float32Array(colors), indices: new Uint16Array(indices) };
 }
 
-function setupSimpleTriangle() {
-    const vertices = new Float32Array([
-        0.0,  0.5,  0.0,   // Vertex 1
-       -0.5, -0.5,  0.0,   // Vertex 2
-        0.5, -0.5,  0.0,   // Vertex 3
-    ]);
+const sun = generateDome(5, 32); // Radius 5
 
-    vertexBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+// Position the sun above the dome
+const sunPosition = [0, 40, -30];
+
+
+// Buffers for ground and sky
+let groundVertexBuffer, groundColorBuffer;
+let skyVertexBuffer, skyColorBuffer;
+
+function setupGroundAndSkyBuffers() {
+    // Ground buffers
+    groundVertexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, groundVertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, groundVertices, gl.STATIC_DRAW);
+
+    groundColorBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, groundColorBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, groundColors, gl.STATIC_DRAW);
+
+    // Sky buffers
+    skyVertexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, skyVertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, skyVertices, gl.STATIC_DRAW);
+
+    skyColorBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, skyColorBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, skyColors, gl.STATIC_DRAW);
+
+    const sunVertexBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, sunVertexBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, sun.vertices, gl.STATIC_DRAW);
+
+const sunColorBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, sunColorBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, sun.colors, gl.STATIC_DRAW);
+
+const sunIndexBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sunIndexBuffer);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, sun.indices, gl.STATIC_DRAW);
+
+}
+
+const dome = generateDome(50, 32); // Radius 50, 32 segments
+
+const domeVertexBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, domeVertexBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, dome.vertices, gl.STATIC_DRAW);
+
+const domeColorBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, domeColorBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, dome.colors, gl.STATIC_DRAW);
+
+const domeIndexBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, domeIndexBuffer);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, dome.indices, gl.STATIC_DRAW);
+
+
+
+function render() {
+    updateCamera(); // Update camera position and direction
+
+    // Clear the screen
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    solidShader.use(); // Use the solid color shader
+
+    // Set up the common MVP matrix
+    const mvpMatrix = mat4.create();
+    mat4.multiply(mvpMatrix, projectionMatrix, viewMatrix);
+
+    // Draw the Sky Dome
+    const skyModelMatrix = mat4.create(); // No transformation needed for sky dome
+    let skyMVPMatrix = mat4.create();
+    mat4.multiply(skyMVPMatrix, mvpMatrix, skyModelMatrix);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, domeVertexBuffer);
+    solidShader.setAttribute('aPosition', 3, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, domeColorBuffer);
+    solidShader.setAttribute('aColor', 4, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, domeIndexBuffer);
+    solidShader.setUniformMatrix4fv('uModelViewProjection', skyMVPMatrix);
+
+    gl.drawElements(gl.TRIANGLES, dome.indices.length, gl.UNSIGNED_SHORT, 0);
+
+    // Draw the Sun
+    const sunModelMatrix = mat4.create();
+    mat4.translate(sunModelMatrix, sunModelMatrix, sunPosition);
+
+    let sunMVPMatrix = mat4.create();
+    mat4.multiply(sunMVPMatrix, mvpMatrix, sunModelMatrix);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, sunVertexBuffer);
+    solidShader.setAttribute('aPosition', 3, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, sunColorBuffer);
+    solidShader.setAttribute('aColor', 4, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sunIndexBuffer);
+    solidShader.setUniformMatrix4fv('uModelViewProjection', sunMVPMatrix);
+
+    gl.drawElements(gl.TRIANGLES, sun.indices.length, gl.UNSIGNED_SHORT, 0);
+
+    // Draw the Ground
+    const groundModelMatrix = mat4.create(); // No transformation needed for ground
+    let groundMVPMatrix = mat4.create();
+    mat4.multiply(groundMVPMatrix, mvpMatrix, groundModelMatrix);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, groundVertexBuffer);
+    solidShader.setAttribute('aPosition', 3, gl.FLOAT, false, 0, 0);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, groundColorBuffer);
+    solidShader.setAttribute('aColor', 4, gl.FLOAT, false, 0, 0);
+
+    solidShader.setUniformMatrix4fv('uModelViewProjection', groundMVPMatrix);
+
+    gl.drawArrays(gl.TRIANGLES, 0, groundVertices.length / 3);
+
+    // Schedule the next frame
+    requestAnimationFrame(render);
+}
+
+
+
+function main() {
+    canvas = document.getElementById('webgl-canvas');
+    gl = initWebGL(canvas);
+
+    if (!gl) {
+        console.error('WebGL2 not available');
+        return;
+    }
+
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0.2, 0.3, 0.4, 1.0);
+    gl.enable(gl.DEPTH_TEST);
+
+    projectionMatrix = mat4.create();
+    viewMatrix = mat4.create();
+
+    mat4.perspective(projectionMatrix, Math.PI / 3, canvas.width / canvas.height, 0.1, 100.0);
+    mat4.lookAt(viewMatrix, camera.position, camera.target, camera.up);
+
+    solidShader = new SolidShader(gl);
+    
+    
+    setupGroundAndSkyBuffers(); // Create buffers for ground and sky
+    
+    setupEventListeners();
+
+    render();
 }
 
 // Call main when the page loads

@@ -44,7 +44,7 @@ export default class BaseShader{
     //método para crear atributos
     setAttribute(attributeName, size, type, normalize, stride, offset){
         const location = this.gl.getAttribLocation(this.program, attributeName);
-        this.gl.vertexAttribPointer(location, size, type, normalize, offset);
+        this.gl.vertexAttribPointer(location, size, type, normalize, stride, offset);
         this.gl.enableVertexAttribArray(location);
     }
 

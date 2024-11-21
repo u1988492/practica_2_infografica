@@ -24,10 +24,4 @@ export default class SolidShader extends BaseShader {
         super(gl, vsSource, fsSource);
         this.gl = gl;
     }
-
-    setColor(color) {
-        this.use();
-        const colorLocation = this.gl.getUniformLocation(this.program, 'uColor');
-        this.gl.uniform4fv(colorLocation, color);
-    }
 }
