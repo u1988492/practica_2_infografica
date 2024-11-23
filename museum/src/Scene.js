@@ -110,7 +110,7 @@ export default class Scene {
     }
 
     initializeSky() {
-        const skyRadius = 200;  // Keep large radius
+        const skyRadius = 300;  // Keep large radius
         const segments = 64;
         const vertices = [];
         const colors = [];
@@ -118,6 +118,7 @@ export default class Scene {
         
         // Offset the sky dome to be centered at camera height
         const skyOffset = 1.5; // Match initial camera height
+
         
         // Generate vertices for full dome, starting from below horizon
         for (let i = 0; i <= segments/2; i++) {
@@ -314,9 +315,9 @@ export default class Scene {
         const vertices = [];
         const colors = [];
         const indices = [];
-        const postWidth = 0.15;         // Thinner posts
+        const postWidth = 0.5;         // Thinner posts
         height = 1.2;                   // Keep height below camera
-        segments = Math.floor(segments * 0.5);  // Reduce number of posts
+        //segments = Math.floor(segments * 0.9);  // Reduce number of posts
         
         // Generate posts with more spacing
         for (let i = 0; i <= segments; i++) {
@@ -361,26 +362,6 @@ export default class Scene {
             indices: new Uint16Array(indices)
         };
     }    
-
-    render(shader, mvpMatrix) {
-        // Enable depth testing
-        this.gl.enable(this.gl.DEPTH_TEST);
-        this.gl.depthFunc(this.gl.LESS);
-        
-        // Clear both color and depth buffer
-        this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
-        
-        // Render sky first, with depth testing disabled
-        this.gl.disable(this.gl.DEPTH_TEST);
-        this.renderSky(shader, mvpMatrix);
-        this.renderSun(shader, mvpMatrix);
-        
-        // Re-enable depth testing for other objects
-        this.gl.enable(this.gl.DEPTH_TEST);
-        this.renderGround(shader, mvpMatrix);
-        this.renderFence(shader, mvpMatrix);
-        this.renderTrees(shader, mvpMatrix);
-    }
 
     renderGround(shader, mvpMatrix) {
         const modelMatrix = mat4.create();
@@ -548,6 +529,26 @@ export default class Scene {
         shader.setUniformMatrix4fv('uModelViewProjection', fenceMVP);
     
         this.gl.drawElements(this.gl.TRIANGLES, this.objects.fence.indices.length, this.gl.UNSIGNED_SHORT, 0);
+    }
+
+    render(shader, mvpMatrix) {
+        // Enable depth testing
+        this.gl.enable(this.gl.DEPTH_TEST);
+        this.gl.depthFunc(this.gl.LESS);
+        
+        // Clear both color and depth buffer
+        this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
+        
+        // Render sky first, with depth testing disabled
+        this.gl.disable(this.gl.DEPTH_TEST);
+        this.renderSky(shader, mvpMatrix);
+        this.renderSun(shader, mvpMatrix);
+        
+        // Re-enable depth testing for other objects
+        this.gl.enable(this.gl.DEPTH_TEST);
+        this.renderGround(shader, mvpMatrix);
+        this.renderFence(shader, mvpMatrix);
+        this.renderTrees(shader, mvpMatrix);
     }
     
 }

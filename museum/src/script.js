@@ -142,7 +142,8 @@ function main() {
 
     projectionMatrix = mat4.create();
     viewMatrix = mat4.create();
-    mat4.perspective(projectionMatrix, Math.PI / 3, canvas.width / canvas.height, 0.1, 100.0);
+
+    mat4.perspective(projectionMatrix, Math.PI / 3, canvas.width / canvas.height, 0.1, 1000.0);
     mat4.lookAt(viewMatrix, camera.position, camera.target, camera.up);
 
     solidShader = new SolidShader(gl);
