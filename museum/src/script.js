@@ -56,6 +56,13 @@ function setupEventListeners() {
     });
 }
 
+function isPositionValid(position, fenceRadius) {
+    const x = position[0];
+    const z = position[2];
+    const distanceFromCenter = Math.sqrt(x * x + z * z);
+    return distanceFromCenter <= fenceRadius - 1; // Subtract 1 for player radius
+}
+
 function updateCamera() {
     const moveSpeed = 0.1;
     const dirX = Math.cos(pitch) * Math.sin(yaw);
@@ -92,6 +99,14 @@ function updateCamera() {
     // Enforce minimum height
     const minHeight = 1.5; // Your desired minimum height
     newPosition[1] = Math.max(newPosition[1], minHeight);
+
+    if (keysPressed['w'] || keysPressed['s'] || keysPressed['a'] || keysPressed['d']) {
+        const proposedPosition = vec3.clone(newPosition);
+        if (!isPositionValid(proposedPosition, scene.fenceRadius)) {
+            // If invalid position, revert to current position
+            vec3.copy(newPosition, camera.position);
+        }
+    }
     
     // Update position
     camera.position = newPosition;
@@ -139,3 +154,44 @@ function main() {
 }
 
 window.onload = main;
+
+function cleanup() {
+    // Remove event listeners
+    window.removeEventListener('keydown', handleKeyDown);
+    window.removeEventListener('keyup', handleKeyUp);
+    canvas.removeEventListener('mousedown', handleMouseDown);
+    canvas.removeEventListener('mousemove', handleMouseMove);
+    canvas.removeEventListener('mouseup', handleMouseUp);
+    
+    // Dispose scene
+    if (scene) {
+        scene.dispose();
+        scene = null;
+    }
+    
+    // Clean up shader
+    if (solidShader) {
+        solidShader.dispose();
+        solidShader = null;
+    }
+    
+    // Reset variables
+    gl = null;
+    canvas = null;
+    projectionMatrix = null;
+    viewMatrix = null;
+}
+
+window.addEventListener('unload', cleanup);
+
+// Add resize handler
+window.addEventListener('resize', () => {
+    if (!gl || !canvas) return;
+    
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    
+    // Update projection matrix
+    mat4.perspective(projectionMatrix, Math.PI / 3, canvas.width / canvas.height, 0.1, 100.0);
+});

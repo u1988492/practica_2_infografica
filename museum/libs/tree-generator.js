@@ -75,44 +75,54 @@ function generateCone(radius, height, segments) {
 
 function generateTreePositions(count, groundRadius, groundScale, minDistance, fenceRadius) {
     const positions = [];
-    const maxAttempts = 50;
-
-    for (let i = 0; i < count; i++) {
-        let position;
-        let attempts = 0;
-
-        do {
-            // Random position generation within a circle
-            const angle = Math.random() * Math.PI * 2; // Random angle
-            const distance = fenceRadius + minDistance + Math.random() * (groundScale * 0.8 - fenceRadius - minDistance);
-
-            const x = distance * Math.cos(angle);
-            const z = distance * Math.sin(angle);
-
-            // Calculate height based on the curved ground
-            const distanceFromCenter = Math.sqrt(x * x + z * z) / groundScale;
-            const theta = (Math.PI / 8) * distanceFromCenter; // Match ground curvature
-            const y = groundRadius * (1 - Math.cos(theta)); // Height based on curve
-
-            position = [x, y, z];
-
-            // Check if the position is far enough from existing trees
-            const isFarEnough = positions.every(existingPos => {
-                const dx = position[0] - existingPos[0];
-                const dz = position[2] - existingPos[2];
-                return Math.sqrt(dx * dx + dz * dz) >= minDistance;
-            });
-
-            // Break the loop if the position is valid or maximum attempts exceeded
-            if (isFarEnough || attempts >= maxAttempts) {
-                positions.push(position);
-                break;
-            }
-
-            attempts++;
-        } while (attempts < maxAttempts);
+    const grid = new Map(); // Grid-based spatial partitioning
+    const cellSize = minDistance;
+    
+    function getGridKey(x, z) {
+        return `${Math.floor(x/cellSize)},${Math.floor(z/cellSize)}`;
     }
-
+    
+    function checkPosition(x, z) {
+        const key = getGridKey(x, z);
+        // Check surrounding cells
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dz = -1; dz <= 1; dz++) {
+                const neighborKey = `${Math.floor(x/cellSize) + dx},${Math.floor(z/cellSize) + dz}`;
+                if (grid.has(neighborKey)) {
+                    const positions = grid.get(neighborKey);
+                    for (const pos of positions) {
+                        const dist = Math.sqrt(
+                            Math.pow(x - pos[0], 2) + 
+                            Math.pow(z - pos[2], 2)
+                        );
+                        if (dist < minDistance) return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+    
+    while (positions.length < count) {
+        const angle = Math.random() * Math.PI * 2;
+        const distance = (fenceRadius + 5) + Math.random() * (groundScale * 0.4);
+        const x = distance * Math.cos(angle);
+        const z = distance * Math.sin(angle);
+        
+        if (checkPosition(x, z)) {
+            const distanceFromCenter = Math.sqrt(x * x + z * z) / groundScale;
+            const theta = (Math.PI / 8) * distanceFromCenter;
+            const y = groundRadius * (1 - Math.cos(theta));
+            
+            const position = [x, y, z];
+            positions.push(position);
+            
+            const key = getGridKey(x, z);
+            if (!grid.has(key)) grid.set(key, []);
+            grid.get(key).push(position);
+        }
+    }
+    
     return positions;
 }
 
