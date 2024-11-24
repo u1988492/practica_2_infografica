@@ -29,7 +29,7 @@ export default class BaseShader{
         this.gl.compileShader(shader);
 
         if(!this.gl.getShaderParameter(shader, this.gl.COMPILE_STATUS)){
-            console.error('Error compilando el shader: ', this.gl.getShaderInfoLog(shader));
+            console.error(`Shader compilation failed: ${this.gl.getShaderInfoLog(shader)}`);
             this.gl.deleteShader(shader);
             return null;
         }
@@ -40,7 +40,6 @@ export default class BaseShader{
         this.gl.useProgram(this.program);
     }
 
-    //método para crear atributos
     setAttribute(attributeName, size, type, normalize, stride, offset){
         const location = this.gl.getAttribLocation(this.program, attributeName);
         this.gl.vertexAttribPointer(location, size, type, normalize, stride, offset);

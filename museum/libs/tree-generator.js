@@ -2,40 +2,62 @@ function generateCylinder(radius, height, segments) {
     const vertices = [];
     const colors = [];
     const indices = [];
-    let currentIndex = 0;
+    const normals = [];
 
-    // Generate vertices for top and bottom circles
-    for (let i = 0; i <= segments; i++) {
-        const angle = (i / segments) * Math.PI * 2;
-        const x = Math.cos(angle) * radius;
-        const z = Math.sin(angle) * radius;
+    for (let y = -height/2; y <= height/2; y += height) {
+        for (let i = 0; i <= segments; i++) {
+            const angle = (i / segments) * Math.PI * 2;
+            const x = Math.cos(angle) * radius;
+            const z = Math.sin(angle) * radius;
+            
+            vertices.push(x, y, z);
+            colors.push(0.6, 0.4, 0.2, 1.0);
 
-        // Bottom vertex
-        vertices.push(x, 0, z);
-        colors.push(0.45, 0.25, 0.0, 1.0); // Brown color for trunk
-        
-        // Top vertex
-        vertices.push(x, height, z);
-        colors.push(0.45, 0.25, 0.0, 1.0);
-        
-        if (i < segments) {
-            // Create triangles for cylinder wall
-            indices.push(
-                currentIndex,
-                currentIndex + 1,
-                currentIndex + 2,
-                currentIndex + 1,
-                currentIndex + 3,
-                currentIndex + 2
-            );
-            currentIndex += 2;
+            const nx = Math.cos(angle);
+            const nz = Math.sin(angle);
+            normals.push(nx, 0, nz);
         }
     }
-
+    
+    for (let i = 0; i < segments; i++) {
+        const current = i;
+        const next = (i + 1);
+        const currentTop = current + segments + 1;
+        const nextTop = next + segments + 1;
+        
+        indices.push(current, currentTop, next);
+        indices.push(currentTop, nextTop, next);
+    }
+    
+    const bottomCenter = vertices.length / 3;
+    vertices.push(0, -height/2, 0);
+    colors.push(0.6, 0.4, 0.2, 1.0);
+    normals.push(0, -1, 0);
+    
+    const topCenter = bottomCenter + 1;
+    vertices.push(0, height/2, 0);
+    colors.push(0.6, 0.4, 0.2, 1.0);
+    normals.push(0, 1, 0);
+    
+    for (let i = 0; i < segments; i++) {
+        indices.push(
+            bottomCenter,
+            i,
+            i + 1
+        );
+        
+        indices.push(
+            topCenter,
+            i + segments + 1,
+            i + segments + 2
+        );
+    }
+    
     return {
         vertices: new Float32Array(vertices),
         colors: new Float32Array(colors),
-        indices: new Uint16Array(indices)
+        indices: new Uint16Array(indices),
+        normals: new Float32Array(normals)
     };
 }
 
@@ -43,19 +65,27 @@ function generateCone(radius, height, segments) {
     const vertices = [];
     const colors = [];
     const indices = [];
+    const normals = [];
+
+    vertices.push(0, height, 0);  
+    colors.push(0.2, 0.6, 0.2, 1.0);
     
-    // Add top vertex (tip of cone)
-    vertices.push(0, height, 0);
-    colors.push(0.2, 0.6, 0.2, 1.0); // Green color for leaves
+    const slantHeight = Math.sqrt(radius * radius + height * height);
+    const nx = radius / slantHeight;
+    const ny = height / slantHeight;
+    normals.push(0, 1, 0);  
     
-    // Generate base vertices
     for (let i = 0; i <= segments; i++) {
         const angle = (i / segments) * Math.PI * 2;
         const x = Math.cos(angle) * radius;
         const z = Math.sin(angle) * radius;
         
-        vertices.push(x, 0, z);
+        vertices.push(x, 0, z);  
         colors.push(0.2, 0.6, 0.2, 1.0);
+        
+        const normalX = Math.cos(angle) * nx;
+        const normalZ = Math.sin(angle) * nx;
+        normals.push(normalX, ny, normalZ);
         
         if (i < segments) {
             indices.push(
@@ -66,16 +96,30 @@ function generateCone(radius, height, segments) {
         }
     }
     
+    const baseCenter = vertices.length / 3;
+    vertices.push(0, 0, 0);
+    colors.push(0.2, 0.6, 0.2, 1.0);
+    normals.push(0, -1, 0);
+    
+    for (let i = 1; i <= segments; i++) {
+        indices.push(
+            baseCenter,
+            i,
+            i + 1
+        );
+    }
+    
     return {
         vertices: new Float32Array(vertices),
         colors: new Float32Array(colors),
-        indices: new Uint16Array(indices)
+        indices: new Uint16Array(indices),
+        normals: new Float32Array(normals)
     };
 }
 
 function generateTreePositions(count, groundRadius, groundScale, minDistance, fenceRadius) {
     const positions = [];
-    const grid = new Map(); // Grid-based spatial partitioning
+    const grid = new Map();
     const cellSize = minDistance;
     
     function getGridKey(x, z) {
@@ -84,7 +128,6 @@ function generateTreePositions(count, groundRadius, groundScale, minDistance, fe
     
     function checkPosition(x, z) {
         const key = getGridKey(x, z);
-        // Check surrounding cells
         for (let dx = -1; dx <= 1; dx++) {
             for (let dz = -1; dz <= 1; dz++) {
                 const neighborKey = `${Math.floor(x/cellSize) + dx},${Math.floor(z/cellSize) + dz}`;
@@ -125,4 +168,3 @@ function generateTreePositions(count, groundRadius, groundScale, minDistance, fe
     
     return positions;
 }
-

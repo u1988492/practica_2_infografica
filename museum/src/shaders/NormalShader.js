@@ -19,7 +19,7 @@ export default class NormalShader extends BaseShader {
         out vec4 fragColor;
         void main() {
             vec3 normalizedNormal = normalize(vNormal);
-            fragColor = vec4((normalizedNormal + 1.0) * 0.5, 1.0); // Map normal to color
+            fragColor = vec4((normalizedNormal + 1.0) * 0.5, 1.0); 
         }`;
 
         super(gl, vsSource, fsSource);
