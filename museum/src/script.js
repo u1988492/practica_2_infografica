@@ -1,6 +1,6 @@
 import { initWebGL } from './utils.js';
-import SolidShader from './shaders/SolidShader.js';
 import Scene from './Scene.js';
+import SolidShader from './shaders/SolidShader.js';
 
 //preparación de variables
 let gl, canvas;
@@ -58,8 +58,8 @@ function setupEventListeners() {
     window.addEventListener('keydown', (event) => {
         keysPressed[event.key] = true;
     
-        if (event.key === 't' || event.key === 'T') {
-            scene.useWireframe = !scene.useWireframe; // Toggle wireframe mode
+        if (event.key === 'v' || event.key === 'V') { // Single key for cycling view modes
+            scene.currentViewMode = (scene.currentViewMode + 1) % Object.keys(Scene.ViewModes).length; // Cycle modes
         }
     
         // Press 'F' to throw seeds
@@ -67,7 +67,6 @@ function setupEventListeners() {
             scene.throwSeed(camera.position, camera.target);
         }
     });
-
 
 }
 

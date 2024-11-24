@@ -20,7 +20,6 @@ export default class BaseShader{
             console.error('No se pudo iniciaizar el programa de shader: ', this.gl.getProgramInfoLog(shaderProgram));
             return null;
         }
-
         return shaderProgram;
     }
 
