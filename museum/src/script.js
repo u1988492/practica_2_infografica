@@ -1,106 +1,229 @@
-//archivo principal de gestión del funcionamiento
+import { initWebGL } from './utils.js';
+import Scene from './Scene.js';
+import SolidShader from './shaders/SolidShader.js';
 
-import { mat4 } from 'https://cdn.jsdelivr.net/npm/gl-matrix@2.8.1/esm/index.js'; //librería gl-matrix
-import { initWebGL } from './utils.js'; //archivo auxiliar
-import SolidShader from './shaders/SolidShader.js' //clase de solid shader
-
-//variables iniciales
+//preparación de variables
 let gl, canvas;
-let projectionMatrix, viewMatrix, modelMatrix;
-let vertexBuffer;
+let projectionMatrix, viewMatrix;
 let solidShader;
+let scene;
 
 const camera = {
-    position: [0, 1.5, 5], //posición de la cámara
-    target: [0, 1.5, 0], //punto de mira de la cámara
-    up: [0, 1, 0], //dirección "arriba"
+    position: [0, 1.5, 5],
+    target: [0, 1.5, -5],
+    up: [0, 1, 0],
 };
 
-//creación de la escena
+let yaw = 0;
+let pitch = 0;
+
+let keysPressed = {};
+
+// limpieza de instancias creadas
+function cleanup() {
+    // eliminar event listeners
+    window.removeEventListener('keydown', handleKeyDown);
+    window.removeEventListener('keyup', handleKeyUp);
+    canvas.removeEventListener('mousedown', handleMouseDown);
+    canvas.removeEventListener('mousemove', handleMouseMove);
+    canvas.removeEventListener('mouseup', handleMouseUp);
+    
+    // eliminar escena
+    if (scene) {
+        scene.dispose();
+        scene = null;
+    }
+    
+    // limpiar shader
+    if (solidShader) {
+        solidShader.dispose();
+        solidShader = null;
+    }
+    
+    // reiniciar variables
+    gl = null;
+    canvas = null;
+    projectionMatrix = null;
+    viewMatrix = null;
+}
+
+// prepración de cámara y movimientos
+
+function setupEventListeners() {
+    //detectar movimientos de jugador y cámara
+    window.addEventListener('keydown', (event) => {
+        keysPressed[event.key] = true;
+    });
+    window.addEventListener('keyup', (event) => {
+        keysPressed[event.key] = false;
+    });
+
+    // guardar posiciones del ratón
+    let lastMouseX = 0;
+    let lastMouseY = 0;
+    let isMouseDown = false;
+    let sensitivity = 0.002;
+
+    // detectar click en pantalla
+    canvas.addEventListener('mousedown', (event) => {
+        isMouseDown = true;
+        lastMouseX = event.clientX;
+        lastMouseY = event.clientY;
+    });
+
+    // mover cámara según el movimiento del mouse
+    canvas.addEventListener('mousemove', (event) => {
+        if (!isMouseDown) return;
+        let deltaX = event.clientX - lastMouseX;
+        let deltaY = event.clientY - lastMouseY;
+        yaw += deltaX * sensitivity;
+        pitch -= deltaY * sensitivity;
+        pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
+        updateCamera();
+        lastMouseX = event.clientX;
+        lastMouseY = event.clientY;
+    });
+
+    // dejar de actualizar cámara cuando se suelta el mouse
+    canvas.addEventListener('mouseup', () => {
+        isMouseDown = false;
+    });
+
+    //detectar interacciones
+    window.addEventListener('keydown', (event) => {
+        keysPressed[event.key] = true;
+    
+        // cambiar modo de visualización
+        if (event.key === 'v' || event.key === 'V') { 
+            scene.currentViewMode = (scene.currentViewMode + 1) % Object.keys(Scene.ViewModes).length; 
+        }
+    
+        // tirar semillas
+        if (event.key === 'f' || event.key === 'F') {
+            scene.throwSeed(camera.position, camera.target);
+        }
+    });
+
+    // detectar cambio de tamaño de la pestaña
+    window.addEventListener('resize', () => {
+        if (!gl || !canvas) return;
+        
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        
+        // actualizar cámara según el tamaño de la pantalla
+        mat4.perspective(projectionMatrix, Math.PI / 3, canvas.width / canvas.height, 0.1, 100.0);
+    });
+
+    // limpiar event listeners creados
+    window.addEventListener('unload', cleanup);
+
+}
+
+// limitar movimiento del jugador al interior de la valla, teniendo en cuenta el tamaño del jugador
+function isPositionValid(position, fenceRadius) {
+    const x = position[0];
+    const z = position[2];
+    const distanceFromCenter = Math.sqrt(x * x + z * z);
+    return distanceFromCenter <= fenceRadius - 1; 
+}
+
+// actualizar posición de la cámara según las teclas WASD y el movimiento del mouse
+function updateCamera() {
+    const moveSpeed = 0.12; // velocidad del jugador
+
+    // movimiento en 3 direcciones
+    const dirX = Math.cos(pitch) * Math.sin(yaw);
+    const dirY = Math.sin(pitch);
+    const dirZ = Math.cos(pitch) * Math.cos(yaw);
+
+    // posición a la que apunta la cámara
+    camera.target = [
+        camera.position[0] + dirX,
+        camera.position[1] + dirY,
+        camera.position[2] + dirZ,
+    ];
+
+    // vector de "delante"
+    const forward = vec3.create();
+    vec3.subtract(forward, camera.target, camera.position);
+    forward[1] = 0;
+    vec3.normalize(forward, forward);
+
+    // vector de "derecha"
+    const right = vec3.create();
+    const up = [0, 1, 0];
+    vec3.cross(right, forward, up);
+    vec3.normalize(right, right);
+
+    // crear posición nueva
+    const newPosition = vec3.clone(camera.position);
+
+    // aplicar movimientos según el sentido y la dirección
+    if (keysPressed['w']) vec3.scaleAndAdd(newPosition, newPosition, forward, moveSpeed);
+    if (keysPressed['s']) vec3.scaleAndAdd(newPosition, newPosition, forward, -moveSpeed);
+    if (keysPressed['a']) vec3.scaleAndAdd(newPosition, newPosition, right, -moveSpeed);
+    if (keysPressed['d']) vec3.scaleAndAdd(newPosition, newPosition, right, moveSpeed);
+
+    // altura mínima de la cámara (según el jugador)
+    const minHeight = 1.5; 
+    newPosition[1] = Math.max(newPosition[1], minHeight);
+
+    if (keysPressed['w'] || keysPressed['s'] || keysPressed['a'] || keysPressed['d']) {
+        const proposedPosition = vec3.clone(newPosition);
+        // controlar que la nueva posición esté dentro de la valla
+        if (!isPositionValid(proposedPosition, scene.fenceRadius)) {
+            vec3.copy(newPosition, camera.position);
+        }
+    }
+    
+    // actualizar posición
+    camera.position = newPosition;
+    mat4.lookAt(viewMatrix, camera.position, camera.target, camera.up);
+}
+
+// renderizar escena
+function render(timeStamp = 0) {
+    updateCamera();
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // comenzar con solid shader por defecto
+    solidShader.use();
+    const mvpMatrix = mat4.create();
+    mat4.multiply(mvpMatrix, projectionMatrix, viewMatrix);
+
+    scene.render(solidShader, mvpMatrix, timeStamp);
+    requestAnimationFrame(render); // actualizar escena a cada frame
+}
+
 function main() {
-    //inicializar contexto webgl
+    // inicializar contexto webgl
     canvas = document.getElementById('webgl-canvas');
     gl = initWebGL(canvas);
 
     if (!gl) {
-        console.error('WebGL2 no está disponible');
+        console.error('WebGL2 not available');
         return;
     }
 
-    // preparar viewport y resetear color
     gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.clearColor(0.1, 0.1, 0.1, 1.0);
+    gl.clearColor(0.2, 0.3, 0.4, 1.0);
     gl.enable(gl.DEPTH_TEST);
 
-    //preparar matrices
     projectionMatrix = mat4.create();
     viewMatrix = mat4.create();
-    modelMatrix = mat4.create();
 
-    //proyección: perspectiva en primera persona; FOV: 45 grados, near: 0.1, far: 100
-    mat4.perspective(projectionMatrix, Math.PI/4, canvas.width / canvas.height, 0.1, 100.0);
-
-    //matriz de vista: la cámara apunta al target
+    mat4.perspective(projectionMatrix, Math.PI / 3, canvas.width / canvas.height, 0.1, 1000.0);
     mat4.lookAt(viewMatrix, camera.position, camera.target, camera.up);
 
+    // crear escena
     solidShader = new SolidShader(gl);
-
-    //crear sala
-    setupRoom();
-
-    // bucle de renderizado
+    scene = new Scene(gl);
+    scene.initialize();
+    
+    setupEventListeners();
     render();
 }
 
-function render() {
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-    //usar programa de solid shader
-    solidShader.use();
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-
-    solidShader.setAttribute('aPosition', 3, gl.FLOAT, false, 0, 0);
-
-    //combinar matrices para renderizar
-    const mvpMatrix = mat4.create();
-    mat4.multiply(mvpMatrix, projectionMatrix, viewMatrix); // poyección * vista
-    mat4.multiply(mvpMatrix, mvpMatrix, modelMatrix); //(proyección*vista)*modelo
-
-    //pasar la matriz al shader 
-    solidShader.setUniformMatrix4fv('uModelViewProjection', mvpMatrix);
-
-    //dibujar la sala
-    gl.drawArrays(gl.TRIANGLES, 0, 36); //12 triángulos; 36 vértices
-
-
-    requestAnimationFrame(render);
-}
-
-function setupRoom(){
-    //vértices de la sala: suelo, 3 paredes, techo
-    const vertices = new Float32Array([
-        //suelo
-        -5, 0, -5,  5, 0, -5,  5, 0, 5,
-        -5, 0, -5,  5, 0, 5,  -5, 0, 5,
-        //pared izq
-        -5, 0, -5,  -5, 5, -5,  -5, 5, 5,
-        -5, 0, -5,  -5, 5, 5,  -5, 0, 5,
-        //pared dcha
-        5, 0, -5,  5, 5, -5,  5, 5, 5,
-        5, 0, -5,  5, 5, 5,  5, 0, 5,
-        //pared atrás
-        -5, 0, -5,  -5, 5, -5,  5, 5, -5,
-        -5, 0, -5,  5, 5, -5,  5, 0, -5,
-        //techo
-        -5, 5, -5,  5, 5, -5,  5, 5, 5,
-        -5, 5, -5,  5, 5, 5,  -5, 5, 5,
-    ]);
-
-    //crear vertex buffer y guardar la geometría de la sala
-    vertexBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
-}
-
-main();
+window.onload = main;

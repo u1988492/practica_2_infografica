@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!--CLAUDIA REBECA HODOROGA, u1988492-->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Museum Scene</title>
+    <title>Park Scene</title>
     <style>
         body { margin: 0; overflow: hidden; }
         canvas { display: block; }
@@ -12,11 +13,10 @@
 </head>
 <body>
     <canvas id="webgl-canvas"></canvas>
+    <!-- librerías -->
+    <script src="./libs/gl-matrix.js"></script>
+    <script src="./libs/tree-generator.js"></script>
+    <!-- Main script -->
     <script type="module" src="./src/script.js"></script>
-    <script type="module">
-        import { mat4 } from 'https://cdn.jsdelivr.net/npm/gl-matrix@2.8.1/esm/gl-matrix.js';
-    </script>
-
 </body>
 </html>
-
