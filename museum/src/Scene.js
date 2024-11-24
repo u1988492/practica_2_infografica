@@ -1,3 +1,5 @@
+import WireframeShader from './shaders/WireframeShader.js';
+
 export default class Scene {
     constructor(gl) {
         this.gl = gl;
@@ -5,14 +7,32 @@ export default class Scene {
             ground: null,
             sky: null,
             sun: null,
-            trees: null
+            trees: null,
+            birds: [],  // Initialize the birds array
+            seeds: []   // Add seeds array
         };
+
         this.buffers = {};
         this.disposed = false;
         this.fenceRadius = 40;
         this.treeVariations = [];
         this.treeBuffers = [];
         this.treePositions = [];
+        this.lastBirdSpawn = 0;
+        this.birdSpawnInterval = 5000;
+
+        // Bird system parameters
+        this.birdFlockCenter = [0, 15, 0];
+        this.birdFlockRadius = this.fenceRadius * 0.8;
+        this.birdHeightVariance = 5;
+        this.maxBirds = 10;
+        this.minBirds = 3;
+        this.birdGeometry = null;
+
+        // Add seed system parameters
+        this.seedLifespan = 10000; // Seeds last 10 seconds
+        this.seedAttractRadius = 8; // Birds are attracted within 8 units
+        this.birdSeekingSpeed = 0.05; // How fast birds move towards seeds
     }
 
     dispose() {
@@ -44,11 +64,14 @@ export default class Scene {
     }
 
     initialize() {
+        this.wireframeShader = new WireframeShader(this.gl);
+        this.useWireframe = false; // Toggle state
         this.initializeGround();
         this.initializeSky();
         this.initializeSun();
-        this.initializeFence();  // Add this line
+        this.initializeFence();
         this.initializeTrees();
+        this.initializeBirds();
     }
 
     initializeGround() {
@@ -123,7 +146,7 @@ export default class Scene {
         // Generate vertices for full dome, starting from below horizon
         for (let i = 0; i <= segments/2; i++) {
             // Adjust latitude range to start from below horizon
-            const lat = ((i * Math.PI) / segments) - Math.PI/6; // Start from -30 degrees
+            const lat = ((i * Math.PI) / segments) * 1.2 - Math.PI/6; // Start from -30 degrees
             const sinLat = Math.sin(lat);
             const cosLat = Math.cos(lat);
             
@@ -254,6 +277,21 @@ export default class Scene {
         this.buffers.fenceIndex = this.createIndexBuffer(fence.indices);
         this.objects.fence = fence;
     }
+
+    initializeBirds() {
+        // Store bird geometry for later reference
+        this.birdGeometry = this.generateBird();
+        
+        // Create buffers
+        this.buffers.birdVertex = this.createBuffer(this.birdGeometry.vertices);
+        this.buffers.birdColor = this.createBuffer(this.birdGeometry.colors);
+        this.buffers.birdIndex = this.createIndexBuffer(this.birdGeometry.indices);
+        
+        // Initialize some birds
+        for (let i = 0; i < 5; i++) {
+            this.spawnBird();
+        }
+    }
     
 
     createBuffer(data) {
@@ -363,6 +401,292 @@ export default class Scene {
         };
     }    
 
+    generateBird() {
+        const vertices = [];
+        const colors = [];
+        const indices = [];
+        
+        // Body (streamlined shape)
+        const bodyLength = 0.4;
+        const bodyRadius = 0.15;
+        const bodySegments = 8;
+        
+        // Generate body vertices (conical shape)
+        for (let i = 0; i <= bodySegments; i++) {
+            const angle = (i / bodySegments) * Math.PI * 2;
+            const x = Math.cos(angle);
+            const y = Math.sin(angle);
+            
+            // Front of body (pointed)
+            vertices.push(
+                bodyLength, 0, 0,  // nose
+                bodyLength * 0.5, x * bodyRadius, y * bodyRadius,  // middle
+                -bodyLength * 0.5, x * bodyRadius * 0.8, y * bodyRadius * 0.8  // back
+            );
+            
+            // Bird color (dark gray with slight variations)
+            const colorVar = Math.random() * 0.1;
+            for (let j = 0; j < 3; j++) {
+                colors.push(
+                    0.3 + colorVar,
+                    0.3 + colorVar,
+                    0.35 + colorVar,
+                    1.0
+                );
+            }
+            
+            if (i < bodySegments) {
+                const baseIndex = i * 3;
+                indices.push(
+                    baseIndex, baseIndex + 1, baseIndex + 3,
+                    baseIndex + 1, baseIndex + 4, baseIndex + 3
+                );
+            }
+        }
+        
+        // Wings (triangular shape)
+        const wingSpan = 1.2;
+        const wingDepth = 0.6;
+        const wingBaseIndex = vertices.length / 3;
+        
+        // Left wing
+        vertices.push(
+            0, 0, 0,              // base
+            -wingDepth, 0, wingSpan,  // tip
+            wingDepth, 0, wingSpan    // back
+        );
+        
+        // Right wing
+        vertices.push(
+            0, 0, 0,               // base
+            -wingDepth, 0, -wingSpan, // tip
+            wingDepth, 0, -wingSpan   // back
+        );
+        
+        // Wing colors (slightly lighter than body)
+        for (let i = 0; i < 6; i++) {
+            colors.push(0.4, 0.4, 0.45, 1.0);
+        }
+        
+        // Wing indices
+        indices.push(
+            wingBaseIndex, wingBaseIndex + 1, wingBaseIndex + 2,
+            wingBaseIndex + 3, wingBaseIndex + 4, wingBaseIndex + 5
+        );
+        
+        return {
+            vertices: new Float32Array(vertices),
+            colors: new Float32Array(colors),
+            indices: new Uint16Array(indices)
+        };
+    }
+
+    generateSeedParticle(seed) {
+        return {
+            position: [...seed.position],
+            velocity: [
+                (Math.random() - 0.5) * 0.5,  // Random spread
+                Math.random() * 0.5,          // Upward drift
+                (Math.random() - 0.5) * 0.5
+            ],
+            size: 0.1 + Math.random() * 0.1,
+            life: 1.0,  // Full life
+            color: [0.8, 0.7, 0.3, 1.0]  // Golden yellow
+        };
+    }
+
+    spawnBird() {
+        if (this.objects.birds.length >= this.maxBirds) return;
+        
+        // Random position on a sphere
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        const radius = this.birdFlockRadius * (0.7 + Math.random() * 0.3);
+        
+        const position = [
+            this.birdFlockCenter[0] + radius * Math.sin(phi) * Math.cos(theta),
+            this.birdFlockCenter[1] + this.birdHeightVariance * (Math.random() - 0.5),
+            this.birdFlockCenter[2] + radius * Math.sin(phi) * Math.sin(theta)
+        ];
+        
+        this.objects.birds.push({
+            position: position,
+            rotation: [0, theta, 0],
+            wingAngle: 0,
+            wingSpeed: 0.1 + Math.random() * 0.1,
+            timeOffset: Math.random() * Math.PI * 2,
+            flightRadius: radius,
+            baseHeight: position[1],
+            state: 'flying',
+            flightTime: 0,
+            flightDirection: Math.random() < 0.5 ? 1 : -1,
+            personalSpace: 2 + Math.random() * 2 // Random personal space radius
+        });
+    }
+
+    updateBirds(timeStamp) {
+        const deltaTime = timeStamp - (this.lastTimeStamp || timeStamp);
+    this.lastTimeStamp = timeStamp;
+    
+    // Spawn or remove birds to maintain desired flock size
+    if (timeStamp - this.lastBirdSpawn > this.birdSpawnInterval) {
+        if (this.objects.birds.length < this.minBirds) {
+            this.spawnBird();
+        } else if (this.objects.birds.length < this.maxBirds && Math.random() < 0.3) {
+            this.spawnBird();
+        }
+        this.lastBirdSpawn = timeStamp;
+    }
+    
+    // Update each bird
+    this.objects.birds = this.objects.birds.filter(bird => {
+        // Update wing animation
+        bird.wingAngle = Math.sin(timeStamp * bird.wingSpeed + bird.timeOffset) * 0.5;
+
+        switch (bird.state) {
+            case 'seeking':
+                // Check for nearby seeds
+                let nearestSeed = null;
+                let nearestDistance = Infinity;
+                
+                this.objects.seeds.forEach(seed => {
+                    if (!seed.onGround) return; // Only attracted to seeds on ground
+                    
+                    const dx = seed.position[0] - bird.position[0];
+                    const dy = seed.position[1] - bird.position[1];
+                    const dz = seed.position[2] - bird.position[2];
+                    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                    
+                    if (distance < this.seedAttractRadius && distance < nearestDistance) {
+                        nearestSeed = seed;
+                        nearestDistance = distance;
+                    }
+                });
+                
+                if (nearestSeed) {
+                    const direction = [
+                        nearestSeed.position[0] - bird.position[0],
+                        nearestSeed.position[1] - bird.position[1],
+                        nearestSeed.position[2] - bird.position[2]
+                    ];
+                    const distance = Math.sqrt(
+                        direction[0] * direction[0] + 
+                        direction[1] * direction[1] + 
+                        direction[2] * direction[2]
+                    );
+                    
+                    // Normalize direction
+                    direction[0] /= distance;
+                    direction[1] /= distance;
+                    direction[2] /= distance;
+                    
+                    // Move towards seed
+                    bird.position[0] += direction[0] * this.birdSeekingSpeed * deltaTime;
+                    bird.position[1] += direction[1] * this.birdSeekingSpeed * deltaTime;
+                    bird.position[2] += direction[2] * this.birdSeekingSpeed * deltaTime;
+                    
+                    // Update rotation to face movement direction
+                    bird.rotation[1] = Math.atan2(direction[0], direction[2]);
+                    
+                    // If very close to seed, consume it
+                    if (distance < 0.5) {
+                        nearestSeed.consumed = true;
+                        bird.state = 'flying';
+                    }
+                } else {
+                    bird.state = 'flying';
+                }
+                break;
+                
+            case 'flying':
+            default:
+                // Normal circular flight pattern
+                bird.flightTime += deltaTime * 0.001;
+                const circleSpeed = 0.0005 * deltaTime;
+                const heightSpeed = 0.001 * deltaTime;
+                
+                // Update position in a circular pattern
+                const radius = bird.flightRadius;
+                const angle = bird.flightTime * bird.flightDirection;
+                
+                bird.position[0] = this.birdFlockCenter[0] + Math.cos(angle) * radius;
+                bird.position[2] = this.birdFlockCenter[2] + Math.sin(angle) * radius;
+                
+                // Add slight vertical movement
+                bird.position[1] = bird.baseHeight + 
+                    Math.sin(bird.flightTime * 2) * this.birdHeightVariance;
+                
+                // Update rotation to face movement direction
+                bird.rotation[1] = angle + (bird.flightDirection < 0 ? Math.PI : 0);
+                break;
+        }
+        
+        return true;
+    });
+    }
+
+    updateSeeds(timeStamp) {
+    const deltaTime = 1/60; // Assume 60fps for physics
+    const gravity = -9.8;
+    
+    // Initialize particles array if it doesn't exist
+    this.seedParticles = this.seedParticles || [];
+    
+    // Update and filter seeds
+    this.objects.seeds = this.objects.seeds.filter(seed => {
+        // Remove consumed or old seeds
+        if (seed.consumed || timeStamp - seed.spawnTime > this.seedLifespan) {
+            // Generate particles when seed is consumed
+            if (seed.consumed) {
+                for (let i = 0; i < 10; i++) {
+                    this.seedParticles.push(this.generateSeedParticle(seed));
+                }
+            }
+            return false;
+        }
+        
+            // Update seed physics if not on ground
+            if (!seed.onGround) {
+                // Update position
+                seed.position[0] += seed.velocity[0] * deltaTime;
+                seed.position[1] += seed.velocity[1] * deltaTime;
+                seed.position[2] += seed.velocity[2] * deltaTime;
+                
+                // Apply gravity
+                seed.velocity[1] += gravity * deltaTime;
+                
+                // Check ground collision
+                const groundHeight = this.calculateGroundHeight(seed.position[0], seed.position[2]);
+                if (seed.position[1] <= groundHeight) {
+                    seed.position[1] = groundHeight;
+                    seed.onGround = true;
+                    
+                    // Generate impact particles
+                    for (let i = 0; i < 5; i++) {
+                        this.seedParticles.push(this.generateSeedParticle(seed));
+                    }
+                }
+            }
+            
+            return true;
+        });
+    
+        // Update particles
+        this.seedParticles = this.seedParticles.filter(particle => {
+            particle.life -= deltaTime * 2; // Fade out over 0.5 seconds
+            
+            // Update position
+            particle.position[0] += particle.velocity[0] * deltaTime;
+            particle.position[1] += particle.velocity[1] * deltaTime;
+            particle.position[2] += particle.velocity[2] * deltaTime;
+            
+            // Add slight upward drift
+            particle.velocity[1] += 0.1 * deltaTime;
+            
+            return particle.life > 0;
+        });
+    }
+
     renderGround(shader, mvpMatrix) {
         const modelMatrix = mat4.create();
         let groundMVP = mat4.create();
@@ -371,13 +695,19 @@ export default class Scene {
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffers.groundVertex);
         shader.setAttribute('aPosition', 3, this.gl.FLOAT, false, 0, 0);
 
-        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffers.groundColor);
-        shader.setAttribute('aColor', 4, this.gl.FLOAT, false, 0, 0);
+        // Conditionally bind color buffer if shader is not the wireframe shader
+        if (shader !== this.wireframeShader) {
+            this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffers.groundColor);
+            shader.setAttribute('aColor', 4, this.gl.FLOAT, false, 0, 0);
+        }
 
         this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.buffers.groundIndex);
         shader.setUniformMatrix4fv('uModelViewProjection', groundMVP);
         
-        this.gl.drawElements(this.gl.TRIANGLES, this.objects.ground.indices.length, this.gl.UNSIGNED_SHORT, 0);
+        // Use LINES for wireframe, TRIANGLES otherwise
+        const drawMode = shader === this.wireframeShader ? this.gl.LINES : this.gl.TRIANGLES;
+        this.gl.drawElements(drawMode, this.objects.ground.indices.length, this.gl.UNSIGNED_SHORT, 0);
+
     }
 
     renderSky(shader, mvpMatrix) {
@@ -484,8 +814,10 @@ export default class Scene {
             this.gl.bindBuffer(this.gl.ARRAY_BUFFER, treeBuffers.trunk.vertex);
             shader.setAttribute('aPosition', 3, this.gl.FLOAT, false, 0, 0);
             
-            this.gl.bindBuffer(this.gl.ARRAY_BUFFER, treeBuffers.trunk.color);
-            shader.setAttribute('aColor', 4, this.gl.FLOAT, false, 0, 0);
+            if (shader !== this.wireframeShader) {
+                this.gl.bindBuffer(this.gl.ARRAY_BUFFER, treeBuffers.trunk.color);
+                shader.setAttribute('aColor', 4, this.gl.FLOAT, false, 0, 0);
+            }
             
             this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, treeBuffers.trunk.index);
             shader.setUniformMatrix4fv('uModelViewProjection', treeMVP);
@@ -500,8 +832,10 @@ export default class Scene {
             this.gl.bindBuffer(this.gl.ARRAY_BUFFER, treeBuffers.leaves.vertex);
             shader.setAttribute('aPosition', 3, this.gl.FLOAT, false, 0, 0);
             
-            this.gl.bindBuffer(this.gl.ARRAY_BUFFER, treeBuffers.leaves.color);
-            shader.setAttribute('aColor', 4, this.gl.FLOAT, false, 0, 0);
+            if (shader !== this.wireframeShader) {
+                this.gl.bindBuffer(this.gl.ARRAY_BUFFER, treeBuffers.leaves.color);
+                shader.setAttribute('aColor', 4, this.gl.FLOAT, false, 0, 0);
+            }
             
             this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, treeBuffers.leaves.index);
             shader.setUniformMatrix4fv('uModelViewProjection', treeMVP);
@@ -521,9 +855,11 @@ export default class Scene {
     
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffers.fenceVertex);
         shader.setAttribute('aPosition', 3, this.gl.FLOAT, false, 0, 0);
-    
-        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffers.fenceColor);
-        shader.setAttribute('aColor', 4, this.gl.FLOAT, false, 0, 0);
+
+        if (shader !== this.wireframeShader) {
+            this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffers.fenceColor);
+            shader.setAttribute('aColor', 4, this.gl.FLOAT, false, 0, 0);
+        }
     
         this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.buffers.fenceIndex);
         shader.setUniformMatrix4fv('uModelViewProjection', fenceMVP);
@@ -531,7 +867,142 @@ export default class Scene {
         this.gl.drawElements(this.gl.TRIANGLES, this.objects.fence.indices.length, this.gl.UNSIGNED_SHORT, 0);
     }
 
-    render(shader, mvpMatrix) {
+    renderBirds(shader, mvpMatrix, timeStamp) {
+        this.updateBirds(timeStamp);
+        
+        this.objects.birds.forEach(bird => {
+            const modelMatrix = mat4.create();
+            
+            // Position
+            mat4.translate(modelMatrix, modelMatrix, bird.position);
+            
+            // Rotation
+            mat4.rotateY(modelMatrix, modelMatrix, bird.rotation[1]);
+            
+            // Wing animation
+            const leftWingMatrix = mat4.clone(modelMatrix);
+            const rightWingMatrix = mat4.clone(modelMatrix);
+            
+            mat4.rotateZ(leftWingMatrix, leftWingMatrix, bird.wingAngle);
+            mat4.rotateZ(rightWingMatrix, rightWingMatrix, -bird.wingAngle);
+            
+            // Render bird body
+            let birdMVP = mat4.create();
+            mat4.multiply(birdMVP, mvpMatrix, modelMatrix);
+            
+            this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffers.birdVertex);
+            shader.setAttribute('aPosition', 3, this.gl.FLOAT, false, 0, 0);
+
+            if (shader !== this.wireframeShader) {
+                this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffers.birdColor);
+                shader.setAttribute('aColor', 4, this.gl.FLOAT, false, 0, 0);
+            }
+            
+            this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.buffers.birdIndex);
+            shader.setUniformMatrix4fv('uModelViewProjection', birdMVP);
+            
+            // Use stored geometry indices length
+            this.gl.drawElements(this.gl.TRIANGLES, this.birdGeometry.indices.length, this.gl.UNSIGNED_SHORT, 0);
+        });
+    }
+
+    // Add method to render seed particles
+    renderSeedParticles(shader, mvpMatrix) {
+        if (!this.seedParticles || this.seedParticles.length === 0) return;
+        
+        // Enable blending for particles
+        this.gl.enable(this.gl.BLEND);
+        this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA);
+        
+        // Create simple quad for particles
+        const particleVertices = new Float32Array([
+            -0.5, -0.5, 0.0,
+            0.5, -0.5, 0.0,
+            0.5, 0.5, 0.0,
+            -0.5, 0.5, 0.0
+        ]);
+        
+        const particleIndices = new Uint16Array([0, 1, 2, 0, 2, 3]);
+        
+        // Create buffers if they don't exist
+        if (!this.buffers.particleVertex) {
+            this.buffers.particleVertex = this.createBuffer(particleVertices);
+            this.buffers.particleIndex = this.createIndexBuffer(particleIndices);
+        }
+        
+        // Render each particle
+        this.seedParticles.forEach(particle => {
+            const modelMatrix = mat4.create();
+            mat4.translate(modelMatrix, modelMatrix, particle.position);
+            mat4.scale(modelMatrix, modelMatrix, [particle.size, particle.size, particle.size]);
+            
+            const particleMVP = mat4.create();
+            mat4.multiply(particleMVP, mvpMatrix, modelMatrix);
+            
+            // Set particle color with alpha based on life
+            const particleColor = new Float32Array([
+                particle.color[0],
+                particle.color[1],
+                particle.color[2],
+                particle.color[3] * particle.life
+            ]);
+            
+            this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffers.particleVertex);
+            shader.setAttribute('aPosition', 3, this.gl.FLOAT, false, 0, 0);
+            
+            if (shader !== this.wireframeShader) {
+                // Set color uniform directly since it's the same for all vertices
+                shader.setUniform4fv('uColor', particleColor);
+            }
+            
+            this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.buffers.particleIndex);
+            shader.setUniformMatrix4fv('uModelViewProjection', particleMVP);
+            
+            this.gl.drawElements(this.gl.TRIANGLES, 6, this.gl.UNSIGNED_SHORT, 0);
+        });
+        
+        // Disable blending after rendering particles
+        this.gl.disable(this.gl.BLEND);
+    }
+
+    // Add seed throwing system
+    throwSeed(cameraPosition, cameraTarget) {
+        // Calculate throw direction from camera
+        const direction = vec3.create();
+        vec3.subtract(direction, cameraTarget, cameraPosition);
+        vec3.normalize(direction, direction);
+        
+        // Calculate right direction
+        const right = vec3.create();
+        const up = [0, 1, 0];
+        vec3.cross(right, forward, up);
+        vec3.normalize(right, right);
+
+         // Offset the spawn position to the "right hand" of the camera
+        const seedPosition = vec3.create();
+        vec3.scaleAndAdd(seedPosition, cameraPosition, forward, 1.5); // Slightly in front
+        vec3.scaleAndAdd(seedPosition, seedPosition, right, 0.5); // Offset to the right
+
+        
+        // Initial velocity: forward direction with upward arc and some randomness
+        const velocity = vec3.create();
+        vec3.scale(velocity, forward, 10); // Base forward velocity
+        velocity[1] += 5; // Upward velocity for the arc
+        velocity[0] += (Math.random() - 0.5) * 2; // Random horizontal variation
+        velocity[2] += (Math.random() - 0.5) * 2; // Random depth variation
+        
+        this.objects.seeds.push({
+            position: [...seedPosition],
+            velocity: [...velocity],
+            spawnTime: performance.now(),
+            onGround: false
+        });
+    }
+
+    render(shader, mvpMatrix, timeStamp) {
+        // Update seeds in render loop
+        this.updateSeeds(timeStamp);
+
         // Enable depth testing
         this.gl.enable(this.gl.DEPTH_TEST);
         this.gl.depthFunc(this.gl.LESS);
@@ -541,14 +1012,22 @@ export default class Scene {
         
         // Render sky first, with depth testing disabled
         this.gl.disable(this.gl.DEPTH_TEST);
+        // Sky and sun use solid shader regardless
+        shader.use();
         this.renderSky(shader, mvpMatrix);
         this.renderSun(shader, mvpMatrix);
         
         // Re-enable depth testing for other objects
         this.gl.enable(this.gl.DEPTH_TEST);
-        this.renderGround(shader, mvpMatrix);
-        this.renderFence(shader, mvpMatrix);
-        this.renderTrees(shader, mvpMatrix);
+        // Switch between solid and wireframe shader
+        const activeShader = this.useWireframe ? this.wireframeShader : shader;
+        activeShader.use();
+
+        this.renderGround(activeShader, mvpMatrix);
+        this.renderFence(activeShader, mvpMatrix);
+        this.renderTrees(activeShader, mvpMatrix);
+        this.renderBirds(activeShader, mvpMatrix, timeStamp);
+        this.renderSeedParticles(activeShader, mvpMatrix);
     }
     
 }

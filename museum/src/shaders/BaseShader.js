@@ -61,4 +61,10 @@ export default class BaseShader{
     getUniformLocation(name){
         return this.gl.getUniformLocation(this.program, name);
     }
+
+    setUniform4fv(name, value) {
+        const location = this.getUniformLocation(name);
+        this.gl.uniform4fv(location, value);
+    }
+    
 }

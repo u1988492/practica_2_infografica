@@ -54,6 +54,21 @@ function setupEventListeners() {
     canvas.addEventListener('mouseup', () => {
         isMouseDown = false;
     });
+
+    window.addEventListener('keydown', (event) => {
+        keysPressed[event.key] = true;
+    
+        if (event.key === 't' || event.key === 'T') {
+            scene.useWireframe = !scene.useWireframe; // Toggle wireframe mode
+        }
+    
+        // Press 'F' to throw seeds
+        if (event.key === 'f' || event.key === 'F') {
+            scene.throwSeed(camera.position, camera.target);
+        }
+    });
+
+
 }
 
 function isPositionValid(position, fenceRadius) {
@@ -115,7 +130,7 @@ function updateCamera() {
 }
 
 
-function render() {
+function render(timeStamp = 0) {
     updateCamera();
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
@@ -123,7 +138,7 @@ function render() {
     const mvpMatrix = mat4.create();
     mat4.multiply(mvpMatrix, projectionMatrix, viewMatrix);
 
-    scene.render(solidShader, mvpMatrix);
+    scene.render(solidShader, mvpMatrix, timeStamp);
     requestAnimationFrame(render);
 }
 
