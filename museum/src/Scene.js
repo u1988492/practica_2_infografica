@@ -42,7 +42,7 @@ export default class Scene {
 
         this.seedLifespan = 10000; // Seeds last 10 seconds
         this.seedAttractRadius = 50; // Birds are attracted within 8 units
-        this.birdSeekingSpeed = 0.05; // How fast birds move towards seeds
+        this.birdSeekingSpeed = 0.02; // How fast birds move towards seeds
     }
 
     dispose() {
@@ -298,6 +298,7 @@ export default class Scene {
         
         // Create buffers
         this.buffers.birdVertex = this.createBuffer(this.birdGeometry.vertices);
+        this.buffers.birdNormal = this.gl.createBuffer();
         this.buffers.birdColor = this.createBuffer(this.birdGeometry.colors);
         this.buffers.birdIndex = this.createIndexBuffer(this.birdGeometry.indices);
         
@@ -419,6 +420,7 @@ export default class Scene {
         const vertices = [];
         const colors = [];
         const indices = [];
+        const normals = [];
         
         // Body (streamlined shape)
         const bodyLength = 0.6;
@@ -432,18 +434,28 @@ export default class Scene {
             const cosTheta = Math.cos(theta);
             
             for (let j = 0; j <= bodySegments; j++) {
-                const phi = (j / bodySegments) * 2 * Math.PI; // Longitude
-                const x = bodyRadius * sinTheta * Math.cos(phi);
-                const y = (bodyRadius * 0.6) * cosTheta; // Slight flattening for egg shape
-                const z = bodyRadius * sinTheta * Math.sin(phi);
-    
+                const phi = (j / bodySegments) * 2 * Math.PI;
+                const sinPhi = Math.sin(phi);
+                const cosPhi = Math.cos(phi);
+
+                // Vertex position
+                const x = bodyRadius * sinTheta * cosPhi;
+                const y = (bodyRadius * 0.6) * cosTheta;
+                const z = bodyRadius * sinTheta * sinPhi;
                 vertices.push(x, y, z);
+
+                // Normal vector (pointing outward from surface)
+                const nx = sinTheta * cosPhi;
+                const ny = cosTheta;
+                const nz = sinTheta * sinPhi;
+                normals.push(nx, ny, nz);
     
                 // Brownish color for the body
                 colors.push(0.4 + Math.random() * 0.1, 0.25 + Math.random() * 0.1, 0.15, 1.0);
             }
         }
     
+        // Generate indices
         for (let i = 0; i < bodySegments; i++) {
             for (let j = 0; j < bodySegments; j++) {
                 const first = i * (bodySegments + 1) + j;
@@ -466,11 +478,25 @@ export default class Scene {
             -bodyLength * 0.4 - wingSpan, 0.0, 0.0 // Tip pointing outward
         );
 
+        // Left wing normals (pointing upward)
+        normals.push(
+            0.0, 1.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 1.0, 0.0
+        );
+
         // Right wing (attached by side)
         vertices.push(
             bodyLength * 0.4, 0.0, -wingDepth,  // Base-left attachment
             bodyLength * 0.4, 0.0, wingDepth,   // Base-right attachment
             bodyLength * 0.4 + wingSpan, 0.0, 0.0 // Tip pointing outward
+        );
+
+        // Right wing normals (pointing upward)
+        normals.push(
+            0.0, 1.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 1.0, 0.0
         );
 
         // Brownish color for wings
@@ -486,6 +512,7 @@ export default class Scene {
 
         return {
             vertices: new Float32Array(vertices),
+            normals: new Float32Array(normals),
             colors: new Float32Array(colors),
             indices: new Uint16Array(indices)
         };
@@ -547,6 +574,12 @@ export default class Scene {
             }
             this.lastBirdSpawn = timeStamp;
         }
+
+        this.objects.seeds.forEach((seed, index) => {
+            if (seed.onGround) {
+                console.log(`Seed ${index}: [${seed.position.map(p => p.toFixed(2))}] onGround: ${seed.onGround}`);
+            }
+        });
         
         // Update each bird
         this.objects.birds = this.objects.birds.filter(bird => {
@@ -560,7 +593,7 @@ export default class Scene {
                     let nearestDistance = Infinity;
                     
                     this.objects.seeds.forEach(seed => {
-                        if (!seed.onGround) return; // Only attracted to seeds on ground
+                        if (!seed.onGround || seed.consumed) return; // Only attracted to seeds on ground
                         
                         const dx = seed.position[0] - bird.position[0];
                         const dy = seed.position[1] - bird.position[1];
@@ -591,25 +624,83 @@ export default class Scene {
                         direction[2] /= distance;
                         
                         // Move towards seed
-                        bird.position[0] += direction[0] * this.birdSeekingSpeed * deltaTime;
-                        bird.position[1] += direction[1] * this.birdSeekingSpeed * deltaTime;
-                        bird.position[2] += direction[2] * this.birdSeekingSpeed * deltaTime;
+                        const speed = this.birdSeekingSpeed * deltaTime;
+                        bird.position[0] += direction[0] * speed;
+                        bird.position[1] += direction[1] * speed;
+                        bird.position[2] += direction[2] * speed;
                         
                         // Update rotation to face movement direction
                         bird.rotation[1] = Math.atan2(direction[0], direction[2]);
                         
                         // If very close to seed, consume it
-                        if (distance < 0.5) {
-                            nearestSeed.consumed = true;
-                            bird.state = 'flying';
+                        if (distance < 1.0) {
+                            if (!nearestSeed.consumed) {  // Double check seed hasn't been consumed
+                                nearestSeed.consumed = true;
+                                // Start rising animation
+                                bird.state = 'rising';
+                                bird.riseStartHeight = bird.position[1];
+                                bird.riseTime = 0;
+                            } else {
+                                // If seed was already consumed, return to flying
+                                bird.state = 'flying';
+                            }
                         }
                     } else {
+                        // No seeds available, return to flying
                         bird.state = 'flying';
                     }
                     break;
                     
+                    case 'rising':
+                        // Animation for rising back to flight height with random direction
+                        bird.riseTime += deltaTime * 0.001; // Control rise speed
+                        const riseProgress = Math.min(bird.riseTime, 1);
+                        
+                        // Use an easing function for smooth rise
+                        const easedProgress = 1 - Math.cos(riseProgress * Math.PI * 0.5);
+                        
+                        // If this is the first frame of rising, initialize rise direction
+                        if (!bird.riseDirection) {
+                            bird.riseDirection = {
+                                x: (Math.random() - 0.5) * 2, // Random X direction
+                                z: (Math.random() - 0.5) * 2  // Random Z direction
+                            };
+                            // Normalize the direction vector
+                            const magnitude = Math.sqrt(
+                                bird.riseDirection.x * bird.riseDirection.x + 
+                                bird.riseDirection.z * bird.riseDirection.z
+                            );
+                            bird.riseDirection.x /= magnitude;
+                            bird.riseDirection.z /= magnitude;
+                            
+                            // Store starting position
+                            bird.riseStartPos = [...bird.position];
+                        }
+                        
+                        // Calculate new position with horizontal movement
+                        const horizontalDistance = 5; // Maximum horizontal distance to travel while rising
+                        bird.position[0] = bird.riseStartPos[0] + bird.riseDirection.x * horizontalDistance * easedProgress;
+                        bird.position[1] = bird.riseStartHeight + (bird.baseHeight - bird.riseStartHeight) * easedProgress;
+                        bird.position[2] = bird.riseStartPos[2] + bird.riseDirection.z * horizontalDistance * easedProgress;
+                        
+                        // Update rotation to face movement direction
+                        bird.rotation[1] = Math.atan2(bird.riseDirection.x, bird.riseDirection.z);
+                        
+                        // Once risen, return to normal flight and clear rise direction
+                        if (riseProgress >= 1) {
+                            bird.state = 'flying';
+                            delete bird.riseDirection;
+                            delete bird.riseStartPos;
+                        }
+                        break;
+
                 case 'flying':
                 default:
+                    if (Math.random() < 0.005 && this.objects.seeds.some(seed => seed.onGround)) { // 0.5% chance per update
+                        bird.state = 'seeking';
+                        console.log('Bird switched to seeking state');
+                    }
+
                     // Normal circular flight pattern
                     const circleSpeed = 0.0005;
                     const heightSpeed = 0.001;
@@ -888,62 +979,72 @@ export default class Scene {
         this.updateBirds(timeStamp);
         
         this.objects.birds.forEach(bird => {
-            // Use LINES for wireframe, TRIANGLES otherwise
             const drawMode = shader === this.wireframeShader ? this.gl.LINES : this.gl.TRIANGLES;
-
             const modelMatrix = mat4.create();
             
-            // Position
+            // Position and rotation
             mat4.translate(modelMatrix, modelMatrix, bird.position);
-            
-            // Rotation
             mat4.rotateY(modelMatrix, modelMatrix, bird.rotation[1]);
             
-            // Wing animation
-            const leftWingMatrix = mat4.clone(modelMatrix);
-            const rightWingMatrix = mat4.clone(modelMatrix);
-
-            // Calculate sinusoidal Y offset for wing up and down movement
-            const wingYOffset = Math.sin(timeStamp * bird.wingSpeed + bird.timeOffset) * 0.9;
-            
-            // Apply the wing transformations
-            // Left wing
-            mat4.translate(leftWingMatrix, leftWingMatrix, [0, wingYOffset, 0]); // Add vertical movement
-            mat4.rotateZ(leftWingMatrix, leftWingMatrix, bird.wingAngle);
-
-            // Right wing
-            mat4.translate(rightWingMatrix, rightWingMatrix, [0, wingYOffset, 0]); // Add vertical movement
-            mat4.rotateZ(rightWingMatrix, rightWingMatrix, -bird.wingAngle);
-            
-            // Render bird body
+            // Calculate MVP matrix
             let birdMVP = mat4.create();
             mat4.multiply(birdMVP, mvpMatrix, modelMatrix);
             
+            // Set up vertex attributes
             this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffers.birdVertex);
             shader.setAttribute('aPosition', 3, this.gl.FLOAT, false, 0, 0);
-
-            if (shader !== this.wireframeShader) {
+    
+            // Set up shader-specific attributes
+            if (shader === this.normalShader) {
+                // Normal shader: bind normal buffer
+                this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffers.birdNormal);
+                shader.setAttribute('aNormal', 3, this.gl.FLOAT, false, 0, 0);
+                shader.setUniformMatrix4fv('uModel', modelMatrix);
+            } else if (shader !== this.wireframeShader) {
+                // Color shader: bind color buffer
                 this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffers.birdColor);
                 shader.setAttribute('aColor', 4, this.gl.FLOAT, false, 0, 0);
             }
+            // Wireframe shader doesn't need additional attributes
             
             this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.buffers.birdIndex);
             shader.setUniformMatrix4fv('uModelViewProjection', birdMVP);
-
-            this.gl.drawElements(drawMode, this.birdGeometry.indices.length, this.gl.UNSIGNED_SHORT, 0);
-
-             // Render left wing
+    
+            // Draw body
+            const bodyIndicesCount = this.birdGeometry.indices.length - 6;
+            this.gl.drawElements(drawMode, bodyIndicesCount, this.gl.UNSIGNED_SHORT, 0);
+    
+            // Handle wings
+            const wingAngle = Math.sin(timeStamp * bird.wingSpeed + bird.timeOffset) * 0.5;
+            
+            // Left wing
+            const leftWingMatrix = mat4.clone(modelMatrix);
+            mat4.translate(leftWingMatrix, leftWingMatrix, [-this.bodyLength * 0.4, 0, 0]);
+            mat4.rotateZ(leftWingMatrix, leftWingMatrix, wingAngle);
+            mat4.translate(leftWingMatrix, leftWingMatrix, [this.bodyLength * 0.4, 0, 0]);
+            
             const leftWingMVP = mat4.create();
             mat4.multiply(leftWingMVP, mvpMatrix, leftWingMatrix);
             shader.setUniformMatrix4fv('uModelViewProjection', leftWingMVP);
-            this.gl.drawElements(drawMode, 3, this.gl.UNSIGNED_SHORT, 0); // Adjust indices count as per wing geometry
-
-            // Render right wing
+            if (shader === this.normalShader) {
+                shader.setUniformMatrix4fv('uModel', leftWingMatrix);
+            }
+            this.gl.drawElements(drawMode, 3, this.gl.UNSIGNED_SHORT, bodyIndicesCount * 2);
+    
+            // Right wing
+            const rightWingMatrix = mat4.clone(modelMatrix);
+            mat4.translate(rightWingMatrix, rightWingMatrix, [this.bodyLength * 0.4, 0, 0]);
+            mat4.rotateZ(rightWingMatrix, rightWingMatrix, -wingAngle);
+            mat4.translate(rightWingMatrix, rightWingMatrix, [-this.bodyLength * 0.4, 0, 0]);
+            
             const rightWingMVP = mat4.create();
             mat4.multiply(rightWingMVP, mvpMatrix, rightWingMatrix);
             shader.setUniformMatrix4fv('uModelViewProjection', rightWingMVP);
-            this.gl.drawElements(drawMode, 3, this.gl.UNSIGNED_SHORT, 0); // Adjust indices count as per wing geometry
-            });
+            if (shader === this.normalShader) {
+                shader.setUniformMatrix4fv('uModel', rightWingMatrix);
+            }
+            this.gl.drawElements(drawMode, 3, this.gl.UNSIGNED_SHORT, (bodyIndicesCount + 3) * 2);
+        });
     }
 
     // Add method to render seed particles
